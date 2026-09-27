@@ -4,6 +4,9 @@ A lightweight, high-performance **Signed Distance Field (SDF)** font generation 
 
 This engine generates **4-bit Signed Distance Fields (SDFs)** from TrueType fonts (`.ttf`). A complete 104-character font—including ASCII, punctuation, and German umlauts—occupies **less than 8 KB of flash memory**, enabling continuous scaling, arbitrary rotation, sub-pixel anti-aliasing, and dynamic weight adjustments in real time on resource-constrained hardware.
 
+### Direct Sideload
+Download the ready-to-use [`PebbleDemo.pbw`](https://github.com/utessel/SDFDemo/releases/latest) and open it on your phone with the Pebble app.
+
 ---
 
 ## Key Features
