@@ -1,0 +1,4 @@
+*.o
+sdf_font.h
+sdf_font.c
+view_sdf
