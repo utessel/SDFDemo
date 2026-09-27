@@ -7,7 +7,7 @@
 
 #pragma once
 
-#include <cmath>
+#include <cstdint>
 
 #ifndef M_PI
 #define M_PI 3.14159265358979323846
@@ -44,6 +44,49 @@ public:
     {
     }
 
+    static inline float FastSqrt(float x)
+    {
+        if (x <= 0.0f)
+        {
+            return 0.0f;
+        }
+        union { float f; uint32_t i; } conv = { x };
+        conv.i = 0x5f3759df - (conv.i >> 1);
+        float y = conv.f;
+        y = y * (1.5f - 0.5f * x * y * y);
+        y = y * (1.5f - 0.5f * x * y * y);
+        return x * y;
+    }
+
+    static inline float FastSin(float rad)
+    {
+        constexpr float PI = 3.14159265358979323846f;
+        constexpr float TWO_PI = 2.0f * PI;
+        constexpr float INV_TWO_PI = 1.0f / TWO_PI;
+
+        float k = rad * INV_TWO_PI;
+        int ki = static_cast<int>(k >= 0.0f ? k + 0.5f : k - 0.5f);
+        rad -= static_cast<float>(ki) * TWO_PI;
+
+        if (rad > PI * 0.5f)
+        {
+            rad = PI - rad;
+        }
+        else if (rad < -PI * 0.5f)
+        {
+            rad = -PI - rad;
+        }
+
+        float x2 = rad * rad;
+        return rad * (1.0f - x2 * (1.0f / 6.0f - x2 * (1.0f / 120.0f - x2 * (1.0f / 5040.0f))));
+    }
+
+    static inline float FastCos(float rad)
+    {
+        constexpr float HALF_PI = 1.5707963267948966f;
+        return FastSin(rad + HALF_PI);
+    }
+
     static Matrix2D Identity()
     {
         return Matrix2D(1.0f, 0.0f, 0.0f, 0.0f, 1.0f, 0.0f);
@@ -56,8 +99,8 @@ public:
 
     static Matrix2D Rotation(float rad)
     {
-        float cos_a = std::cos(rad);
-        float sin_a = std::sin(rad);
+        float cos_a = FastCos(rad);
+        float sin_a = FastSin(rad);
         return Matrix2D(cos_a, -sin_a, 0.0f, sin_a, cos_a, 0.0f);
     }
 
@@ -109,7 +152,8 @@ public:
     Matrix2D Inverted() const
     {
         float det = Determinant();
-        if (std::abs(det) < 1e-8f)
+        float abs_det = (det < 0.0f) ? -det : det;
+        if (abs_det < 1e-8f)
         {
             return Identity();
         }
@@ -126,6 +170,6 @@ public:
 
     float GetScaleX() const
     {
-        return std::sqrt(a * a + c * c);
+        return FastSqrt(a * a + c * c);
     }
 };

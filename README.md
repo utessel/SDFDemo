@@ -2,7 +2,7 @@
 
 A lightweight, high-performance **Signed Distance Field (SDF)** font generation and rendering toolkit designed for microcontrollers and embedded systems (such as Pebble smartwatches, ARM Cortex-M, and low-power LCD displays).
 
-Instead of storing dozens of megabytes of pre-rasterized bitmap fonts for different sizes and rotations, this engine generates **4-bit SDFs** from TrueType fonts (`.ttf`). A complete 104-character font—including ASCII, punctuation, and German umlauts—occupies **less than 8 KB of flash memory**, while enabling continuous scaling, arbitrary rotation, and sub-pixel anti-aliasing in real time.
+This engine generates **4-bit Signed Distance Fields (SDFs)** from TrueType fonts (`.ttf`). A complete 104-character font—including ASCII, punctuation, and German umlauts—occupies **less than 8 KB of flash memory**, enabling continuous scaling, arbitrary rotation, sub-pixel anti-aliasing, and dynamic weight adjustments in real time on resource-constrained hardware.
 
 ---
 
@@ -29,13 +29,19 @@ Instead of storing dozens of megabytes of pre-rasterized bitmap fonts for differ
 
 ```
 SDF-Demo/
-├── Matrix2D.hpp       # Header-only 2D affine transformation matrix
-├── TextLayout.hpp/cpp # UTF-8 text metrics and layout geometry
-├── SdfRenderer.hpp/cpp# Generic matrix-driven SDF rasterizer with alpha blending
-├── view_sdf.cpp       # Animated terminal viewer and inspection tool
-├── ttf2sdf.py         # TrueType to 4-bit SDF generator (Cardano solver)
-├── sdf_config.ini     # Configuration: font path, EM height, spread, characters
-├── Makefile           # Automated build with dependency tracking on config & generator
+├── SDFLib/            # Core SDF engine and font generator
+│   ├── Matrix2D.hpp   # Header-only 2D affine transformation matrix (Public Domain)
+│   ├── TextLayout.*   # UTF-8 text metrics and layout geometry (GPLv3)
+│   ├── SdfRenderer.*  # Matrix-driven SDF rasterizer & framebuffer blitter (GPLv3)
+│   ├── ttf2sdf.py     # TrueType to 4-bit SDF generator (Cardano solver)
+│   └── sdf_config.ini # Font generation configuration
+├── TerminalDemo/      # Terminal viewer application
+│   └── view_sdf.cpp   # Animated terminal viewer using Half-Blocks & TrueColor
+├── PebbleDemo/        # Complete Pebble OS smartwatch application
+│   ├── package.json   # Pebble app configuration
+│   ├── wscript        # Waf build script with C++ cross-compiler setup
+│   └── src/main.cpp   # Pebble OS app with rotating & scaling text animation
+├── Makefile           # Top-level build for Terminal Demo & font regeneration
 ├── LICENSE            # GNU General Public License v3.0
 └── README.md
 ```
@@ -52,27 +58,86 @@ SDF-Demo/
   pip install fonttools
   ```
 
-### Build & Run
-Simply clone the repository and build with `make`:
+### Build & Run Terminal Demo
+Build from the root directory with `make`:
 
 ```bash
 make
-./view_sdf
+./TerminalDemo/view_sdf
 ```
 
 To animate custom text:
 ```bash
-./view_sdf "Pebble SDF Engine"
+./TerminalDemo/view_sdf "Pebble SDF Engine"
 ```
 or with special characters / umlauts:
 ```bash
-./view_sdf "Zehn nach Zehn"
+./TerminalDemo/view_sdf "Zehn nach Zehn"
 ```
 
 To inspect single glyphs and view the raw 4-bit distance matrix:
 ```bash
-./view_sdf ä
+./TerminalDemo/view_sdf ä
 ```
+
+---
+
+## Pebble Smartwatch Demo (`PebbleDemo`)
+
+The `PebbleDemo` subproject compiles a native Pebble OS watchapp running on ARM Cortex-M hardware (supporting all Pebble platforms: `basalt`, `chalk`, `emery`, `diorite`, and `aplite`).
+
+### Building and Running on Pebble Emulator
+```bash
+cd PebbleDemo
+pebble build
+pebble install --emulator basalt
+```
+
+### Sideloading to a Physical Pebble Watch
+```bash
+cd PebbleDemo
+pebble install --phone <PHONE_IP_OR_WATCH_IP>
+```
+
+---
+
+## Performance & Architecture
+
+### Real-Time Embedded Optimizations
+
+To achieve smooth rendering on a 100 MHz ARM Cortex-M4 microcontroller without floating-point overhead, the rasterizer incorporates several key architectural optimizations:
+
+1. **Affine Forward Differencing:**
+   Because 2D affine transformations are linear, moving horizontally along a scanline ($sx \to sx + 1$) changes font coordinates by a constant delta $(du, dv)$. Per-pixel 2D matrix-vector multiplications are replaced with single-cycle incremental additions (`cur_u += du_fp; cur_v += dv_fp;`).
+2. **Texel Fast-Path:**
+   Interior texels ($0 \le x_0 < w-1, 0 \le y_0 < h-1$) skip bounds-clamping branches and index directly into consecutive memory rows (`r0[x0]`, `r0[x0+1]`, `r1[x0]`, `r1[x0+1]`).
+3. **Discrete Threshold Shading:**
+   Instead of evaluating a floating-point Hermite polynomial (`smoothstep`) across the entire raster domain, precalculated distance thresholds classify pixels with integer comparisons. Interior glyph pixels write solid color immediately.
+4. **16.16 Fixed-Point & Unshifted Nibble Masking:**
+   The entire rasterizer inner loop operates exclusively in 16.16 integer fixed-point math. Sub-pixel coordinates `cur_u`, `cur_v` and floor/fractions are computed with arithmetic shifts and bitmasks (`tx >> 16`, `(tx >> 8) & 0xFF`). Unshifted nibble bytes (`row[x] & mask`) are interpolated directly without per-pixel bit shifts, and compared against pre-scaled integer thresholds. The hardware FPU remains completely idle during rasterization, minimizing CPU power draw and achieving render times of **1–5 ms**.
+
+### Measured Hardware Benchmarks (Pebble Time 2 / `emery`)
+
+Benchmarked directly on physical hardware (`emery`, STM32F4 Cortex-M4 @ 100 MHz):
+
+| Optimization Stage | Small/Medium Text (Frame Time) | Large / Rotated (Frame Time) | FPS |
+| :--- | :--- | :--- | :--- |
+| **Naive Implementation** (Per-pixel 2D matrix + float Smoothstep) | **65 ms** (Raster: 64 ms) | **135 ms** (Raster: 135 ms) | **7 – 14 FPS** *(stuttering)* |
+| **+ Forward Differencing & Fast Bilinear** | **28 ms** (Raster: 27 ms) | **67 ms** (Raster: 66 ms) | **14 – 26 FPS** |
+| **+ Discrete Threshold Shading & Texel Fast-Path** | **21 – 24 ms** (Raster: 21 ms) | **45 – 53 ms** (Raster: 44 ms) | **20 – 27 FPS** |
+| **+ 16.16 Fixed-Point & Unshifted Nibble Masking** | **2 – 3 ms** (Raster: **1 – 2 ms**) | **4 – 6 ms** (Raster: **4 – 5 ms**) | **27 FPS** *(33ms timer cap!)* |
+
+### Enabling the Built-in Profiler
+
+In `PebbleDemo/src/main.cpp`, set:
+```cpp
+#define ENABLE_PROFILING 1
+```
+This enables rolling 1-second performance metrics output via `APP_LOG`. View the live hardware telemetry over Bluetooth with:
+```bash
+pebble logs --phone <PHONE_IP_OR_WATCH_IP>
+```
+When set to `0` (default), all timing and logging code is stripped out at compile time, saving RAM and eliminating runtime overhead.
 
 ---
 

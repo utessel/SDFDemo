@@ -32,6 +32,13 @@ struct ColorRGB
     ColorRGB(uint8_t r_, uint8_t g_, uint8_t b_) : r(r_), g(g_), b(b_) {}
 };
 
+struct RenderStats
+{
+    uint32_t pixels_scanned = 0;
+    uint32_t pixels_sampled = 0;
+    uint32_t pixels_written = 0;
+};
+
 class SdfRenderer
 {
 public:
@@ -40,6 +47,12 @@ public:
                          const TextLayout &layout, const Matrix2D &matrix,
                          ColorRGB color, float filter_width_px = 1.0f,
                          float weight_bias_px = 0.0f, bool pebble_shades = true);
+
+    /* Direct 8-bit framebuffer renderer (Pebble GBitmapFormat8Bit: Basalt, Chalk, Emery) */
+    static void DrawToFramebuffer8Bit(uint8_t *fb_data, int screen_w, int screen_h, int row_bytes,
+                                      const TextLayout &layout, const Matrix2D &matrix,
+                                      float filter_width_px = 1.0f, float weight_bias_px = 0.0f,
+                                      RenderStats *stats = nullptr);
 
 private:
     static float SampleSdfBilinear(const SdfFont *font, const SdfGlyph *glyph, float u, float v);

@@ -26,6 +26,7 @@ import sys
 import configparser
 from fontTools.ttLib import TTFont
 from fontTools.pens.recordingPen import DecomposingRecordingPen
+from fontTools.pens.basePen import decomposeQuadraticSegment
 
 
 def solve_cubic_cardano(c3, c2, c1, c0):
@@ -159,45 +160,39 @@ class BezierSegment:
 
 
 class GlyphContours:
-    def __init__(self, raw_contours, scale, offset_x, offset_y, spread_clamp):
+    def __init__(self, segments):
         self.points = []
         self.lines = []
         self.beziers = []
-        self.raw_contours = []  # for winding number / ray-casting
+        self.ray_poly = []
 
-        for raw_c in raw_contours:
-            scaled_c = [((p[0] * scale) + offset_x, (p[1] * scale) + offset_y) for p in raw_c]
-            self.raw_contours.append(scaled_c)
-            # Add points
-            for p in scaled_c:
-                self.points.append(p)
-
-            # Decompose into segments
-            n = len(raw_c)
-            i = 0
-            while i < n:
-                p0 = scaled_c[i]
-                p1 = scaled_c[(i + 1) % n]
-                flag1 = raw_c[(i + 1) % n][2] if len(raw_c[(i + 1) % n]) > 2 else True
-
-                if flag1:  # On-curve: line segment
-                    self.lines.append(LineSegment(p0, p1))
-                    i += 1
-                else:  # Off-curve: quadratic bezier
-                    p2 = scaled_c[(i + 2) % n]
-                    self.beziers.append(BezierSegment(p0, p1, p2))
-                    i += 2
+        for seg in segments:
+            if seg[0] == 'line':
+                p0, p1 = seg[1], seg[2]
+                self.lines.append(LineSegment(p0, p1))
+                self.points.extend([p0, p1])
+                self.ray_poly.append((p0, p1))
+            elif seg[0] == 'bezier':
+                p0, p1, p2 = seg[1], seg[2], seg[3]
+                bz = BezierSegment(p0, p1, p2)
+                self.beziers.append(bz)
+                self.points.extend([p0, p2])
+                # Subdivide quadratic Bézier into 4 linear segments for accurate ray casting
+                pts = [p0]
+                for step in range(1, 5):
+                    t = step / 4.0
+                    bx = bz.ax * t * t + bz.bx * t + bz.cx
+                    by = bz.ay * t * t + bz.by * t + bz.cy
+                    pts.append((bx, by))
+                for k in range(len(pts) - 1):
+                    self.ray_poly.append((pts[k], pts[k + 1]))
 
     def contains_point(self, qx, qy):
         """Even-Odd ray casting rule for point inside contour."""
         inside = False
-        for contour in self.raw_contours:
-            n = len(contour)
-            for i in range(n):
-                p1 = contour[i]
-                p2 = contour[(i + 1) % n]
-                if ((p1[1] > qy) != (p2[1] > qy)) and \
-                   (qx < (p2[0] - p1[0]) * (qy - p1[1]) / (p2[1] - p1[1] + 1e-12) + p1[0]):
+        for p1, p2 in self.ray_poly:
+            if (p1[1] > qy) != (p2[1] > qy):
+                if qx < (p2[0] - p1[0]) * (qy - p1[1]) / (p2[1] - p1[1] + 1e-12) + p1[0]:
                     inside = not inside
         return inside
 
@@ -218,7 +213,7 @@ def rasterize_sdf(contours, width, height, spread_clamp):
             qx = x + 0.5
             min_d2 = spread_clamp * spread_clamp
 
-            # 1. Endpoints
+            # 1. On-curve endpoints
             for px, py in pts:
                 d2 = (qx - px) ** 2 + (qy - py) ** 2
                 if d2 < min_d2:
@@ -230,7 +225,7 @@ def rasterize_sdf(contours, width, height, spread_clamp):
                 if d2 < min_d2:
                     min_d2 = d2
 
-            # 3. Bezier segments interior
+            # 3. Bezier segments interior (Cardano cubic solver)
             for bz in beziers:
                 d2 = bz.dist_sq_interior(qx, qy)
                 if d2 < min_d2:
@@ -247,7 +242,13 @@ def rasterize_sdf(contours, width, height, spread_clamp):
 
 
 def parse_ttf_glyph(tt, glyph_name):
-    """Extracts raw contours with on/off curve flags from TTF."""
+    """
+    Extracts TrueType contours as clean (cmd, args) segments with decomposed quadratics.
+    Returns list of contours, where each contour is a list of segments:
+      ('line', p0, p1)
+      ('bezier', p0, p1, p2)
+    All coordinates in font units.
+    """
     glyph_set = tt.getGlyphSet()
     if glyph_name not in glyph_set:
         return []
@@ -257,31 +258,37 @@ def parse_ttf_glyph(tt, glyph_name):
 
     contours = []
     current_contour = []
+    curr_pt = None
+    start_pt = None
 
     for cmd, args in pen.value:
         if cmd == 'moveTo':
             if current_contour:
                 contours.append(current_contour)
                 current_contour = []
-            current_contour.append((args[0][0], args[0][1], True))
+            curr_pt = args[0]
+            start_pt = curr_pt
         elif cmd == 'lineTo':
-            current_contour.append((args[0][0], args[0][1], True))
+            p1 = args[0]
+            current_contour.append(('line', curr_pt, p1))
+            curr_pt = p1
         elif cmd == 'qCurveTo':
-            # TTF quadratic bezier: intermediate points are off-curve
-            for pt in args[:-1]:
-                if pt is not None:
-                    current_contour.append((pt[0], pt[1], False))
-            if args[-1] is not None:
-                current_contour.append((args[-1][0], args[-1][1], True))
+            for ctrl, end in decomposeQuadraticSegment(args):
+                current_contour.append(('bezier', curr_pt, ctrl, end))
+                curr_pt = end
         elif cmd == 'closePath':
+            if curr_pt is not None and start_pt is not None and curr_pt != start_pt:
+                current_contour.append(('line', curr_pt, start_pt))
             if current_contour:
                 contours.append(current_contour)
                 current_contour = []
+            curr_pt = start_pt
 
     if current_contour:
         contours.append(current_contour)
 
     return contours
+
 
 
 def main():
@@ -344,13 +351,19 @@ def main():
             })
             continue
 
-        # Compute bounding box in font units
-        all_x = [p[0] for c in raw_contours for p in c]
-        all_y = [p[1] for c in raw_contours for p in c]
-        min_x = min(all_x) * scale
-        max_x = max(all_x) * scale
-        min_y = min(all_y) * scale
-        max_y = max(all_y) * scale
+        # Compute bounding box across all segment points
+        all_pts = []
+        for c in raw_contours:
+            for s in c:
+                if s[0] == 'line':
+                    all_pts.extend([s[1], s[2]])
+                else:
+                    all_pts.extend([s[1], s[2], s[3]])
+
+        min_x = min(p[0] for p in all_pts) * scale
+        max_x = max(p[0] for p in all_pts) * scale
+        min_y = min(p[1] for p in all_pts) * scale
+        max_y = max(p[1] for p in all_pts) * scale
 
         # Add spread margin around glyph
         pad = math.ceil(spread)
@@ -362,22 +375,24 @@ def main():
         w = max(1, grid_x1 - grid_x0)
         h = max(1, grid_y1 - grid_y0)
 
-        # Contours in local grid coordinates (0, 0 at top-left of grid)
+        # Transform segments to local grid coordinates (0, 0 at top-left of grid)
         # Note: TTF Y is up, screen Y is down!
         # local_x = x_font*scale - grid_x0
         # local_y = grid_y1 - y_font*scale
-        # Transform contours:
-        transformed_contours = []
+        transformed_segments = []
         for c in raw_contours:
-            tc = []
-            for p in c:
-                lx = p[0] * scale - grid_x0
-                ly = grid_y1 - p[1] * scale
-                flag = p[2] if len(p) > 2 else True
-                tc.append((lx, ly, flag))
-            transformed_contours.append(tc)
+            for s in c:
+                if s[0] == 'line':
+                    p0 = (s[1][0] * scale - grid_x0, grid_y1 - s[1][1] * scale)
+                    p1 = (s[2][0] * scale - grid_x0, grid_y1 - s[2][1] * scale)
+                    transformed_segments.append(('line', p0, p1))
+                else:
+                    p0 = (s[1][0] * scale - grid_x0, grid_y1 - s[1][1] * scale)
+                    p1 = (s[2][0] * scale - grid_x0, grid_y1 - s[2][1] * scale)
+                    p2 = (s[3][0] * scale - grid_x0, grid_y1 - s[3][1] * scale)
+                    transformed_segments.append(('bezier', p0, p1, p2))
 
-        c_obj = GlyphContours(transformed_contours, scale=1.0, offset_x=0.0, offset_y=0.0, spread_clamp=spread)
+        c_obj = GlyphContours(transformed_segments)
         sdf_grid = rasterize_sdf(c_obj, w, h, spread)
 
         # Convert float distances [-spread, +spread] to 4-bit [0..15]

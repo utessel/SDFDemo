@@ -1,0 +1,29 @@
+{
+  "name": "sdf-pebble-demo",
+  "author": "Uli Tessel",
+  "version": "1.0.0",
+  "private": true,
+  "dependencies": {},
+  "keywords": [
+    "pebble-app"
+  ],
+  "pebble": {
+    "sdkVersion": "3",
+    "projectType": "native",
+    "displayName": "SDF Demo",
+    "uuid": "7a35c1de-4e1b-439f-a89e-29c8e19efd01",
+    "watchapp": {
+      "watchface": false
+    },
+    "targetPlatforms": [
+      "aplite",
+      "basalt",
+      "chalk",
+      "diorite",
+      "emery"
+    ],
+    "resources": {
+      "media": []
+    }
+  }
+}

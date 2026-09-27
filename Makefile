@@ -2,18 +2,18 @@ CXX      ?= g++
 CC       ?= gcc
 PYTHON   ?= python3
 
-CXXFLAGS ?= -O3 -std=c++14 -Wall -Wextra
-CFLAGS   ?= -O3 -Wall -Wextra
+CXXFLAGS ?= -O3 -std=c++14 -Wall -Wextra -I./SDFLib
+CFLAGS   ?= -O3 -Wall -Wextra -I./SDFLib
 LDFLAGS  ?= -lm
 
-TARGET    = view_sdf
-CONFIG    = sdf_config.ini
-GENERATOR = ttf2sdf.py
+TARGET    = TerminalDemo/view_sdf
+CONFIG    = SDFLib/sdf_config.ini
+GENERATOR = SDFLib/ttf2sdf.py
 
-FONT_H    = sdf_font.h
-FONT_C    = sdf_font.c
+FONT_H    = SDFLib/sdf_font.h
+FONT_C    = SDFLib/sdf_font.c
 
-CPP_SRCS  = view_sdf.cpp TextLayout.cpp SdfRenderer.cpp
+CPP_SRCS  = TerminalDemo/view_sdf.cpp SDFLib/TextLayout.cpp SDFLib/SdfRenderer.cpp
 C_SRCS    = $(FONT_C)
 OBJS      = $(CPP_SRCS:.cpp=.o) $(C_SRCS:.c=.o)
 
@@ -24,7 +24,7 @@ $(TARGET): $(FONT_H) $(OBJS)
 	$(CXX) $(OBJS) $(LDFLAGS) -o $@
 
 # Compile C++ sources
-%.o: %.cpp $(FONT_H) Matrix2D.hpp TextLayout.hpp SdfRenderer.hpp
+%.o: %.cpp $(FONT_H) SDFLib/Matrix2D.hpp SDFLib/TextLayout.hpp SDFLib/SdfRenderer.hpp
 	$(CXX) $(CXXFLAGS) -c $< -o $@
 
 # Compile generated C font data
@@ -34,7 +34,7 @@ $(TARGET): $(FONT_H) $(OBJS)
 # Automatic TTF -> SDF font regeneration when config or generator changes
 $(FONT_H) $(FONT_C): $(CONFIG) $(GENERATOR)
 	@echo "[TTF2SDF] Regenerating font from $(CONFIG)..."
-	$(PYTHON) $(GENERATOR) $(CONFIG)
+	cd SDFLib && $(PYTHON) $(notdir $(GENERATOR)) $(notdir $(CONFIG))
 
 clean:
 	rm -f $(OBJS) $(TARGET)
