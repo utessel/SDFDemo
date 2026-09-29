@@ -6,4 +6,5 @@ TerminalDemo/view_sdf
 SDFLib/sdf_font.h
 SDFLib/sdf_font.c
 __pycache__/
+.venv/
 *.swp

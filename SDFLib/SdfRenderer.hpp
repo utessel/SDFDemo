@@ -42,11 +42,16 @@ struct RenderStats
 class SdfRenderer
 {
 public:
-    /* Render layout text with 2D transformation matrix and alpha blending into buffer */
+    /* Render layout text with 2D transformation matrix and alpha blending into buffer.
+     * opacity scales the coverage of the whole glyph (1.0 = opaque, 0.0 = invisible); it
+     * multiplies the anti-aliasing alpha and therefore keeps the edge position unchanged.
+     */
     static void DrawText(ColorRGB *buffer, int screen_w, int screen_h,
                          const TextLayout &layout, const Matrix2D &matrix,
-                         ColorRGB color, float filter_width_px = 1.0f,
-                         float weight_bias_px = 0.0f, bool pebble_shades = true);
+                         ColorRGB color, float opacity = 1.0f,
+                         float filter_width_px = 1.0f,
+                         float weight_bias_px = 0.0f,
+                         RenderStats *stats = nullptr);
 
     /* Direct 8-bit framebuffer renderer (Pebble GBitmapFormat8Bit: Basalt, Chalk, Emery) */
     static void DrawToFramebuffer8Bit(uint8_t *fb_data, int screen_w, int screen_h, int row_bytes,
